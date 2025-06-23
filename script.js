@@ -1,321 +1,378 @@
-// Configuración
-const CONFIG = {
-    UPLOAD_URL: 'http://localhost:8000/api/upload', // Cambia por tu URL
-    MAX_FILE_SIZE: 100 * 1024 * 1024, // 100MB en bytes
-    ALLOWED_TYPES: ['video/mp4', 'video/avi', 'video/mov', 'video/wmv']
-};
+// Configuration
+const API_BASE_URL = 'http://localhost:8000';
+const API_UPLOAD_URL = `${API_BASE_URL}/api/upload`;
 
-// Referencias a elementos del DOM
-const elements = {
-    uploadForm: document.getElementById('uploadForm'),
-    videoFile: document.getElementById('videoFile'),
-    filePreview: document.getElementById('filePreview'),
-    fileName: document.getElementById('fileName'),
-    fileSize: document.getElementById('fileSize'),
-    progressContainer: document.getElementById('progressContainer'),
-    progressBar: document.getElementById('progressBar'),
-    progressText: document.getElementById('progressText'),
-    submitBtn: document.getElementById('submitBtn'),
-    alertContainer: document.getElementById('alertContainer'),
-    resultsSection: document.getElementById('resultsSection'),
-    processedFileName: document.getElementById('processedFileName'),
-    transcriptionText: document.getElementById('transcriptionText'),
-    resumeText: document.getElementById('resumeText')
-};
+// DOM Elements
+const dropArea = document.getElementById('drop-area');
+const videoInput = document.getElementById('video-input');
+const fileInfo = document.getElementById('file-info');
+const fileName = document.getElementById('file-name');
+const fileSize = document.getElementById('file-size');
+const removeFileBtn = document.getElementById('remove-file');
+const uploadBtn = document.getElementById('upload-btn');
+const progressContainer = document.getElementById('progress-container');
+const progressBar = document.getElementById('progress-bar');
+const progressText = document.getElementById('progress-text');
+const progressPercent = document.getElementById('progress-percent');
+const processingStatus = document.getElementById('processing-status');
+const resultsContainer = document.getElementById('results-container');
+const transcriptionContent = document.getElementById('transcription-content');
+const summaryContent = document.getElementById('summary-content');
+const serverStatus = document.getElementById('server-status');
 
-// Inicializar la aplicación cuando el DOM esté listo
+// Global variables
+let selectedFile = null;
+
+// Initialize app
 document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
+    setupEventListeners();
 });
 
-/**
- * Inicializa la aplicación
- */
-function initializeApp() {
-    setupEventListeners();
-    console.log('Aplicación de subida de videos inicializada');
+// Initialize application
+async function initializeApp() {
+    await checkServerHealth();
 }
 
-/**
- * Configura todos los event listeners
- */
-function setupEventListeners() {
-    // Event listener para cambio de archivo
-    elements.videoFile.addEventListener('change', handleFileSelection);
-    
-    // Event listener para envío del formulario
-    elements.uploadForm.addEventListener('submit', handleFormSubmit);
-}
-
-/**
- * Maneja la selección de archivo
- */
-function handleFileSelection(event) {
-    const file = event.target.files[0];
-    
-    if (file) {
-        // Validar tipo de archivo
-        if (!isValidFileType(file)) {
-            showAlert('Tipo de archivo no válido. Solo se permiten videos.', 'warning');
-            clearFileSelection();
-            return;
-        }
+// Health check function
+async function checkServerHealth() {
+    try {
+        updateServerStatus('checking', 'Verificando...');
         
-        // Mostrar preview
-        showFilePreview(file);
-    } else {
-        hideFilePreview();
+        const response = await fetch(`${API_BASE_URL}/`);
+        const data = await response.json();
+        
+        console.log('Health check response:', data);
+        updateServerStatus('online', 'Servidor conectado');
+        showToast('Servidor conectado correctamente', 'success');
+    } catch (error) {
+        console.error('Health check failed:', error);
+        updateServerStatus('offline', 'Servidor desconectado');
+        showToast('No se pudo conectar al servidor', 'error');
     }
 }
 
-/**
- * Maneja el envío del formulario
- */
-async function handleFormSubmit(event) {
-    event.preventDefault();
+// Update server status display
+function updateServerStatus(status, message) {
+    const statusColors = {
+        checking: 'bg-yellow-400 animate-pulse',
+        online: 'bg-green-500',
+        offline: 'bg-red-500'
+    };
     
-    const file = elements.videoFile.files[0];
+    const statusIcon = serverStatus.querySelector('div');
+    const statusText = serverStatus.querySelector('span');
     
-    // Validaciones
-    if (!file) {
-        showAlert('Por favor selecciona un archivo', 'warning');
+    statusIcon.className = `w-3 h-3 rounded-full ${statusColors[status]}`;
+    statusText.textContent = message;
+    statusText.className = status === 'online' ? 'text-green-600' : 
+                          status === 'offline' ? 'text-red-600' : 'text-yellow-600';
+}
+
+// Setup event listeners
+function setupEventListeners() {
+    // File drop area events
+    dropArea.addEventListener('click', () => videoInput.click());
+    dropArea.addEventListener('dragover', handleDragOver);
+    dropArea.addEventListener('dragleave', handleDragLeave);
+    dropArea.addEventListener('drop', handleDrop);
+    
+    // File input change
+    videoInput.addEventListener('change', handleFileSelect);
+    
+    // Remove file button
+    removeFileBtn.addEventListener('click', clearSelectedFile);
+    
+    // Upload button
+    uploadBtn.addEventListener('click', handleUpload);
+    
+    // Copy buttons
+    document.getElementById('copy-transcription').addEventListener('click', () => {
+        copyToClipboard(transcriptionContent.textContent, 'Transcripción copiada');
+    });
+    
+    document.getElementById('copy-summary').addEventListener('click', () => {
+        copyToClipboard(summaryContent.textContent, 'Resumen copiado');
+    });
+}
+
+// Handle drag over
+function handleDragOver(e) {
+    e.preventDefault();
+    dropArea.classList.add('drag-over');
+}
+
+// Handle drag leave
+function handleDragLeave(e) {
+    e.preventDefault();
+    dropArea.classList.remove('drag-over');
+}
+
+// Handle file drop
+function handleDrop(e) {
+    e.preventDefault();
+    dropArea.classList.remove('drag-over');
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        handleFileSelection(files[0]);
+    }
+}
+
+// Handle file selection from input
+function handleFileSelect(e) {
+    const file = e.target.files[0];
+    if (file) {
+        handleFileSelection(file);
+    }
+}
+
+// Handle file selection (common function)
+function handleFileSelection(file) {
+    // Validate file type
+    if (!file.type.startsWith('video/')) {
+        showToast('Por favor selecciona un archivo de video válido', 'error');
         return;
     }
     
-    if (!validateFile(file)) {
+    // Validate file size (100MB limit)
+    const maxSize = 100 * 1024 * 1024; // 100MB
+    if (file.size > maxSize) {
+        showToast('El archivo es demasiado grande. Máximo 100MB', 'error');
         return;
     }
     
-    // Proceder con la subida
-    await uploadFile(file);
+    selectedFile = file;
+    displayFileInfo(file);
 }
 
-/**
- * Valida el archivo seleccionado
- */
-function validateFile(file) {
-    // Validar tipo
-    if (!isValidFileType(file)) {
-        showAlert('Tipo de archivo no válido. Solo se permiten videos.', 'danger');
-        return false;
+// Display file information
+function displayFileInfo(file) {
+    fileName.textContent = file.name;
+    fileSize.textContent = formatFileSize(file.size);
+    
+    fileInfo.classList.remove('hidden');
+    uploadBtn.disabled = false;
+    uploadBtn.classList.remove('disabled:bg-gray-400');
+    uploadBtn.classList.add('hover:bg-green-700');
+}
+
+// Clear selected file
+function clearSelectedFile() {
+    selectedFile = null;
+    videoInput.value = '';
+    fileInfo.classList.add('hidden');
+    uploadBtn.disabled = true;
+    uploadBtn.classList.add('disabled:bg-gray-400');
+    uploadBtn.classList.remove('hover:bg-green-700');
+    hideResults();
+}
+
+// Handle file upload
+async function handleUpload() {
+    if (!selectedFile) {
+        showToast('Por favor selecciona un archivo primero', 'error');
+        return;
     }
     
-    // Validar tamaño
-    if (file.size > CONFIG.MAX_FILE_SIZE) {
-        showAlert(`El archivo es demasiado grande. Máximo ${formatFileSize(CONFIG.MAX_FILE_SIZE)} permitido.`, 'danger');
-        return false;
-    }
-    
-    return true;
-}
-
-/**
- * Verifica si el tipo de archivo es válido
- */
-function isValidFileType(file) {
-    return file.type.startsWith('video/');
-}
-
-/**
- * Sube el archivo al servidor
- */
-async function uploadFile(file) {
+    // Prepare form data
     const formData = new FormData();
-    formData.append('file', file);
-    
-    console.log('Iniciando subida de archivo:', file.name, 'Tamaño:', formatFileSize(file.size));
+    formData.append('file', selectedFile);
     
     try {
+        // Show progress and processing status
         showProgress();
+        showProcessingStatus();
+        updateProcessingStep(1, 'active');
         
-        const response = await fetch(CONFIG.UPLOAD_URL, {
+        // Upload file
+        const response = await fetch(API_UPLOAD_URL, {
             method: 'POST',
             body: formData
         });
-        
-        hideProgress();
-        
-        console.log('Respuesta recibida, status:', response.status);
-        
-        if (response.ok) {
-            const result = await response.json();
-            console.log('Datos de respuesta:', result);
-            handleUploadSuccess(result);
-        } else {
+          if (!response.ok) {
             const errorText = await response.text();
-            console.error('Error del servidor:', errorText);
-            
-            let errorData;
-            try {
-                errorData = JSON.parse(errorText);
-            } catch (e) {
-                errorData = { detail: errorText };
-            }
-            
-            handleUploadError(errorData);
+            console.error('Error response:', errorText);
+            throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
         }
         
+        const data = await response.json();
+        console.log('Upload response completa:', data);
+        
+        // Simulate processing steps
+        await simulateProcessingSteps();
+        
+        // Display results
+        displayResults(data);
+        
+        // Don't show success toast here since displayResults will handle it
+        // showToast('Video procesado exitosamente', 'success');
+        
     } catch (error) {
+        console.error('Upload failed:', error);
+        showToast('Error al procesar el video: ' + error.message, 'error');
         hideProgress();
-        console.error('Error de red o procesamiento:', error);
-        handleUploadError({ detail: error.message });
+        hideProcessingStatus();
     }
 }
 
-
-
-/**
- * Maneja el éxito de la subida
- */
-function handleUploadSuccess(result) {
-    showAlert('¡Video procesado exitosamente!', 'success');
-    console.log('Respuesta del servidor:', result);
-    
-    // Verificar si hay error en la respuesta
-    if (result.error) {
-        handleUploadError({ detail: result.error });
-        return;
-    }
-    
-    // Mostrar los resultados
-    if (result.transcription && result.resume) {
-        showResults(result);
-    } else {
-        showAlert('Video subido pero no se pudieron obtener los resultados de transcripción', 'warning');
-    }
-    
-    // Resetear formulario
-    resetForm();
-}
-
-/**
- * Maneja errores de subida
- */
-function handleUploadError(error) {
-    let message = error.detail || error.message || 'Error desconocido al subir el archivo';
-    
-    console.error('Error completo:', error);
-    
-    // Mostrar el error tal como viene del backend
-    showAlert(`Error: ${message}`, 'danger');
-}
-
-/**
- * Muestra el preview del archivo seleccionado
- */
-function showFilePreview(file) {
-    elements.fileName.textContent = file.name;
-    elements.fileSize.textContent = formatFileSize(file.size);
-    elements.filePreview.classList.remove('d-none');
-}
-
-/**
- * Oculta el preview del archivo
- */
-function hideFilePreview() {
-    elements.filePreview.classList.add('d-none');
-}
-
-/**
- * Limpia la selección de archivo
- */
-function clearFileSelection() {
-    elements.videoFile.value = '';
-    hideFilePreview();
-}
-
-/**
- * Muestra la barra de progreso
- */
+// Show progress bar
 function showProgress() {
-    elements.progressContainer.classList.remove('d-none');
-    elements.submitBtn.disabled = true;
-    elements.submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Subiendo...';
+    progressContainer.classList.remove('hidden');
+    uploadBtn.disabled = true;
     
-    // Simular progreso de subida
-    updateProgress(0);
-    
-    // Simular progreso gradual
+    // Simulate upload progress
     let progress = 0;
     const interval = setInterval(() => {
         progress += Math.random() * 15;
-        if (progress >= 95) {
-            progress = 95;
+        if (progress >= 100) {
+            progress = 100;
             clearInterval(interval);
-            elements.progressText.textContent = 'Procesando video... Por favor espera';
         }
-        updateProgress(progress);
-    }, 200);
-    
-    // Guardar el interval para poder limpiarlo
-    elements.progressContainer.progressInterval = interval;
+        updateProgress(progress, 'Subiendo...');
+    }, 500);
 }
 
-/**
- * Oculta la barra de progreso
- */
+// Hide progress bar
 function hideProgress() {
-    // Limpiar interval si existe
-    if (elements.progressContainer.progressInterval) {
-        clearInterval(elements.progressContainer.progressInterval);
-        elements.progressContainer.progressInterval = null;
-    }
-    
-    elements.progressContainer.classList.add('d-none');
-    elements.submitBtn.disabled = false;
-    elements.submitBtn.innerHTML = '<i class="bi bi-upload me-2"></i>Subir Video';
+    progressContainer.classList.add('hidden');
+    uploadBtn.disabled = false;
 }
 
-/**
- * Actualiza el progreso de subida
- */
-function updateProgress(percent) {
-    elements.progressBar.style.width = percent + '%';
-    
-    if (percent < 100) {
-        elements.progressText.textContent = `Subiendo... ${Math.round(percent)}%`;
-    } else {
-        elements.progressText.textContent = 'Procesando video... Por favor espera';
-        // Mantener la animación de la barra de progreso
-        elements.progressBar.classList.add('progress-bar-striped', 'progress-bar-animated');
+// Update progress bar
+function updateProgress(percent, text) {
+    progressBar.style.width = `${percent}%`;
+    progressPercent.textContent = `${Math.round(percent)}%`;
+    progressText.textContent = text;
+}
+
+// Show processing status
+function showProcessingStatus() {
+    processingStatus.classList.remove('hidden');
+}
+
+// Hide processing status
+function hideProcessingStatus() {
+    processingStatus.classList.add('hidden');
+    // Reset all steps
+    for (let i = 1; i <= 4; i++) {
+        updateProcessingStep(i, 'pending');
     }
 }
 
-/**
- * Muestra una alerta
- */
-function showAlert(message, type) {
-    const alertHtml = `
-        <div class="alert alert-${type} alert-dismissible fade show" role="alert">
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
+// Update processing step
+function updateProcessingStep(step, status) {
+    const stepIcon = document.getElementById(`step${step}-icon`);
+    const statusClasses = {
+        pending: 'bg-gray-200',
+        active: 'bg-blue-500 animate-pulse',
+        completed: 'bg-green-500'
+    };
+    
+    stepIcon.className = `w-6 h-6 rounded-full flex items-center justify-center ${statusClasses[status]}`;
+    
+    if (status === 'completed') {
+        stepIcon.innerHTML = '<i class="fas fa-check text-xs text-white"></i>';
+    }
+}
+
+// Simulate processing steps
+async function simulateProcessingSteps() {
+    const steps = [
+        { step: 1, text: 'Subiendo video...', delay: 1000 },
+        { step: 2, text: 'Extrayendo audio...', delay: 2000 },
+        { step: 3, text: 'Transcribiendo...', delay: 3000 },
+        { step: 4, text: 'Generando resumen...', delay: 2000 }
+    ];
+    
+    for (const { step, text, delay } of steps) {
+        updateProgress(25 * step, text);
+        updateProcessingStep(step, 'active');
+        
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
+        updateProcessingStep(step, 'completed');
+    }
+}
+
+// Display results
+function displayResults(data) {
+    console.log('Datos recibidos del servidor:', data);
+    
+    // Extract transcription and summary from response
+    // Tu backend devuelve 'transcription' y 'resume' (no 'summary')
+    const transcription = data.transcription || data.full_transcription || 'Transcripción no disponible';
+    const summary = data.resume || data.summary || 'Resumen no disponible';
+    
+    // Log para debug
+    console.log('Transcripción:', transcription);
+    console.log('Resumen:', summary);
+    
+    // Update content
+    transcriptionContent.querySelector('p').textContent = transcription;
+    summaryContent.querySelector('p').textContent = summary;
+    
+    // Show results
+    resultsContainer.classList.remove('hidden');
+    hideProgress();
+    hideProcessingStatus();
+    
+    // Show success message from server if available
+    if (data.message) {
+        showToast(data.message, 'success');
+    }
+}
+
+// Hide results
+function hideResults() {
+    resultsContainer.classList.add('hidden');
+}
+
+// Copy to clipboard
+async function copyToClipboard(text, successMessage) {
+    try {
+        await navigator.clipboard.writeText(text);
+        showToast(successMessage, 'success');
+    } catch (error) {
+        showToast('Error al copiar al portapapeles', 'error');
+    }
+}
+
+// Show toast notification
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    const bgColor = type === 'success' ? 'bg-green-500' : 
+                   type === 'error' ? 'bg-red-500' : 'bg-blue-500';
+    
+    toast.className = `${bgColor} text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-2 transform transition-all duration-300 translate-x-full`;
+    
+    toast.innerHTML = `
+        <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+        <span>${message}</span>
+        <button class="ml-4 text-white hover:text-gray-200" onclick="this.parentElement.remove()">
+            <i class="fas fa-times"></i>
+        </button>
     `;
-    elements.alertContainer.innerHTML = alertHtml;
     
-    // Auto-ocultar después de 5 segundos para mensajes de éxito
-    if (type === 'success') {
+    document.getElementById('toast-container').appendChild(toast);
+    
+    // Animate in
+    setTimeout(() => {
+        toast.classList.remove('translate-x-full');
+    }, 100);
+    
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+        toast.classList.add('translate-x-full');
         setTimeout(() => {
-            const alert = elements.alertContainer.querySelector('.alert');
-            if (alert) {
-                const bsAlert = new bootstrap.Alert(alert);
-                bsAlert.close();
+            if (toast.parentElement) {
+                toast.parentElement.removeChild(toast);
             }
-        }, 5000);
-    }
+        }, 300);
+    }, 5000);
 }
 
-/**
- * Resetea el formulario
- */
-function resetForm() {
-    elements.uploadForm.reset();
-    hideFilePreview();
-}
-
-/**
- * Formatea el tamaño del archivo
- */
+// Format file size
 function formatFileSize(bytes) {
     if (bytes === 0) return '0 Bytes';
     
@@ -326,153 +383,11 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-/**
- * Muestra los resultados de la transcripción y el resumen
- */
-function showResults(result) {
-    // Obtener el nombre del archivo actual
-    const currentFile = elements.videoFile.files[0];
-    
-    // Mostrar información del archivo
-    elements.processedFileName.textContent = currentFile ? currentFile.name : 'Video procesado';
-    
-    // Mostrar transcripción
-    elements.transcriptionText.textContent = result.transcription || 'No se pudo obtener la transcripción';
-    
-    // Mostrar resumen
-    elements.resumeText.textContent = result.resume || 'No se pudo generar el resumen';
-    
-    // Mostrar la sección de resultados
-    elements.resultsSection.classList.remove('d-none');
-    
-    // Scroll hacia los resultados
-    setTimeout(() => {
-        elements.resultsSection.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
-}
+// Error handling for fetch requests
+window.addEventListener('unhandledrejection', function(event) {
+    console.error('Unhandled promise rejection:', event.reason);
+    showToast('Error de conexión: ' + event.reason.message, 'error');
+});
 
-/**
- * Copia texto al portapapeles
- */
-function copyToClipboard(elementId) {
-    const element = document.getElementById(elementId);
-    const text = element.textContent;
-    
-    if (navigator.clipboard && window.isSecureContext) {
-        // Usar la API moderna del portapapeles
-        navigator.clipboard.writeText(text).then(() => {
-            showTemporaryTooltip(elementId, 'Copiado!');
-        }).catch(err => {
-            console.error('Error al copiar:', err);
-            fallbackCopyToClipboard(text);
-        });
-    } else {
-        // Fallback para navegadores más antiguos
-        fallbackCopyToClipboard(text);
-    }
-}
-
-/**
- * Método alternativo para copiar al portapapeles
- */
-function fallbackCopyToClipboard(text) {
-    const textArea = document.createElement('textarea');
-    textArea.value = text;
-    textArea.style.position = 'fixed';
-    textArea.style.left = '-999999px';
-    textArea.style.top = '-999999px';
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    
-    try {
-        document.execCommand('copy');
-        showAlert('Texto copiado al portapapeles', 'success');
-    } catch (err) {
-        console.error('Error al copiar:', err);
-        showAlert('Error al copiar el texto', 'danger');
-    }
-    
-    document.body.removeChild(textArea);
-}
-
-/**
- * Muestra un tooltip temporal
- */
-function showTemporaryTooltip(elementId, message) {
-    // Encontrar el botón de copiar asociado
-    const element = document.getElementById(elementId);
-    const button = element.closest('.mb-4').querySelector('button');
-    
-    if (button) {
-        const originalText = button.innerHTML;
-        button.innerHTML = `<i class="bi bi-check me-1"></i>${message}`;
-        button.classList.remove('btn-outline-secondary');
-        button.classList.add('btn-success');
-        
-        setTimeout(() => {
-            button.innerHTML = originalText;
-            button.classList.remove('btn-success');
-            button.classList.add('btn-outline-secondary');
-        }, 2000);
-    }
-}
-
-/**
- * Resetea la aplicación para procesar un nuevo video
- */
-function resetForNewUpload() {
-    // Ocultar resultados
-    elements.resultsSection.classList.add('d-none');
-    
-    // Resetear formulario
-    resetForm();
-    
-    // Limpiar alertas
-    elements.alertContainer.innerHTML = '';
-    
-    // Scroll hacia arriba
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-/**
- * Oculta la sección de resultados
- */
-function hideResults() {
-    elements.resultsSection.classList.add('d-none');
-}
-
-/**
- * Verifica el estado del servidor
- */
-async function checkServerStatus() {
-    const checkButton = event.target;
-    const originalText = checkButton.innerHTML;
-    
-    // Mostrar estado de carga
-    checkButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Verificando...';
-    checkButton.disabled = true;
-    
-    try {
-        // Intentar una petición simple al servidor
-        const response = await fetch(CONFIG.UPLOAD_URL.replace('/api/upload', ''), {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json'
-            }
-        });
-        
-        if (response.ok || response.status === 404) {
-            showAlert('✅ Servidor conectado y funcionando correctamente', 'success');
-        } else {
-            showAlert(`⚠️ Servidor respondió con código ${response.status}`, 'warning');
-        }
-    } catch (error) {
-        showAlert(`❌ No se pudo conectar con el servidor: ${error.message}`, 'danger');
-    }
-    
-    // Restaurar botón
-    checkButton.innerHTML = originalText;
-    checkButton.disabled = false;
-}
-
+// Refresh server status every 30 seconds
+setInterval(checkServerHealth, 30000);
